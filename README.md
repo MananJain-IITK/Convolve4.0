@@ -261,7 +261,7 @@ Although trained and evaluated on tractor loan quotations, the architecture is *
 Manan Jain
 Indian Institute of Technology Kanpur
 
-Nisarg Parashar
+Nisarg Parashar 
 Indian Institute of Technology Kanpur
 
 
