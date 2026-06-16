@@ -1,0 +1,44 @@
+# =========================
+# 1. AI Models & Weights
+# =========================
+# Ignore the entire models directory (Downloaded at runtime)
+models/
+# Catch any stray weights if they accidentally get placed outside
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.onnx
+*.gguf
+*.tar
+
+# =========================
+# 2. Virtual Environments
+# =========================
+.venv/
+venv/
+env/
+
+# =========================
+# 3. Outputs & Temp Files
+# =========================
+# Your local pipeline outputs
+result.json
+# Preprocessor temporary binarized images
+temp_*.png
+temp_*.jpg
+temp_*.jpeg
+
+# =========================
+# 4. Python Cache
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# =========================
+# 5. OS & IDE Hidden Files
+# =========================
+.vscode/
+.idea/
+.DS_Store

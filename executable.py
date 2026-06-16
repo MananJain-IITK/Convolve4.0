@@ -10,19 +10,40 @@ import warnings
 warnings.filterwarnings("ignore")
 
 def main():
-    # 1. Parse Arguments (Modified for Batch Support)
+    # 1. Parse Arguments (Made optional using nargs='*')
     parser = argparse.ArgumentParser(description="Invoice Extraction Tool")
-    # nargs='+' means "one or more arguments". It collects them into a list.
-    parser.add_argument("image_paths", nargs='+', help="Path(s) to invoice image file(s)")
+    parser.add_argument("image_paths", nargs='*', help="Path(s) to invoice image file(s)")
     args = parser.parse_args()
+    
+    image_paths = args.image_paths
+    
+    if not image_paths:
+        user_input = input("\nEnter the path to the invoice image (drag and drop works): ").strip()
+        if not user_input:
+            print("No input provided. Exiting.")
+            return
+        image_paths = [user_input.strip("\"' ")]
     
     # 2. Setup Paths
     base_dir = os.path.dirname(os.path.abspath(__file__))
     models_dir = os.path.join(base_dir, "models")
     result_file = "result.json"
     
-    # 3. Load Existing Results (For Loop Compatibility)
-    # We store results as a LIST of objects: [ {doc1}, {doc2}, ... ]
+    print("\nLoading AI Models into memory (this will take a moment)...")
+    from utils.preprocess import ImagePreprocessor
+    from utils.extractor import LLMExtractor
+    from utils.detector import VisualDetector
+    
+    try:
+        preprocessor = ImagePreprocessor()
+        text_engine = LLMExtractor(os.path.join(models_dir, "llama-1b"))
+        visual_engine = VisualDetector(models_dir)
+        print("All models loaded successfully!")
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR: Failed to load models. Error: {e}")
+        return # Exit immediately if models fail to load
+
+    # 3. Load Existing Results
     existing_data = []
     if os.path.exists(result_file):
         try:
@@ -31,32 +52,31 @@ def main():
                 if isinstance(content, list):
                     existing_data = content
                 elif isinstance(content, dict):
-                    # Handle case where previous run output a single object
                     existing_data = [content]
         except Exception:
             existing_data = []
 
-    # Helper to find/remove existing entry for re-runs
     def remove_existing(doc_id):
         return [item for item in existing_data if item.get("doc_id") != doc_id]
 
     # --- BATCH PROCESSING LOOP ---
-    for image_path in args.image_paths:
-        print(f"Processing: {image_path}...")
+    # Now iterates over our dynamically assigned image_paths variable
+    for image_path in image_paths:
+        if not os.path.exists(image_path):
+            print(f"File not found: {image_path}. Skipping.")
+            continue
+            
+        print(f"\nProcessing: {image_path}...")
         start_time = time.time()
         
         doc_id = os.path.basename(image_path)
         
-        # Prepare Document Object
         doc_output = {
             "doc_id": doc_id,
             "fields": {
-                "dealer_name": None,
-                "model_name": None,
-                "horse_power": None,
-                "asset_cost": None,
-                "signature": None,
-                "stamp": None
+                "dealer_name": None, "model_name": None,
+                "horse_power": None, "asset_cost": None,
+                "signature": None, "stamp": None
             },
             "confidence": 0.95, 
             "processing_time_sec": 0,
@@ -66,35 +86,19 @@ def main():
         temp_img = None
         
         try:
-            # --- PHASE 0: PREPROCESSING ---
-            from utils.preprocess import ImagePreprocessor
-            preprocessor = ImagePreprocessor()
+            # PHASE 0: PREPROCESSING
             temp_img = preprocessor.process(image_path)
             
-            # --- PHASE 1: TEXT EXTRACTION (PaddleOCR + Llama) ---
-            from utils.extractor import LLMExtractor
-            text_engine = LLMExtractor(os.path.join(models_dir, "llama-1b"))
-            
+            # --- PHASE 1: TEXT EXTRACTION (Uses Binarized image) ---
             text_data = text_engine.extract(temp_img)
             doc_output["fields"].update(text_data)
-            
-            del text_engine
-            gc.collect()
-            torch.cuda.empty_cache()
 
-            # --- PHASE 2: VISUAL DETECTION (YOLO + HF) ---
-            from utils.detector import VisualDetector
-            visual_engine = VisualDetector(models_dir)
-            
-            visual_data = visual_engine.detect(temp_img)
+            # --- PHASE 2: VISUAL DETECTION (CRITICAL: Uses Original RGB image!) ---
+            visual_data = visual_engine.detect(image_path) 
             doc_output["fields"]["signature"] = visual_data.get("signature")
             doc_output["fields"]["stamp"] = visual_data.get("stamp")
             
-            del visual_engine
-            gc.collect()
-            torch.cuda.empty_cache()
-
-            # --- METRICS ---
+            # METRICS
             duration = time.time() - start_time
             doc_output["processing_time_sec"] = round(duration, 2)
             doc_output["cost_estimate_usd"] = round(duration * 0.0005, 5)
@@ -103,30 +107,23 @@ def main():
             doc_output["error"] = str(e)
             print(f"Error processing {doc_id}: {e}")
 
-        # Cleanup Temp
+        # Cleanup Temp File
         if temp_img and os.path.exists(temp_img):
             os.remove(temp_img)
 
-        # --- UPDATE RESULT LIST ---
-        # Remove old entry for this doc (if any) and append new one
+        # SAVE INCREMENTAL RESULTS
         existing_data = remove_existing(doc_id)
         existing_data.append(doc_output)
 
-        # Save Incrementally (Safe against crashes)
-        # We assume the user wants a LIST of JSON objects if processing multiple files
-        # If the list has only 1 item, some evaluators might prefer just the dict, 
-        # but a list is the standard for batch output.
-        output_to_save = existing_data
-        
-        # NOTE: If you strictly need a single object for single-file runs
-        # you can uncomment this logic, but for batch consistency, a list is safer.
-        # if len(existing_data) == 1:
-        #     output_to_save = existing_data[0]
-
         with open(result_file, "w") as f:
-            json.dump(output_to_save, f, indent=4)
+            json.dump(existing_data, f, indent=4)
+            
+        # SAFE CACHE CLEARING
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
-    print(f"Finished. Results saved to {result_file}")
+    print(f"\nFinished. Results saved to {result_file}")
 
 if __name__ == "__main__":
     main()

@@ -2,6 +2,7 @@ import os
 import shutil
 import urllib.request
 import tarfile
+import time
 from huggingface_hub import snapshot_download
 
 # --- CONFIGURATION ---
@@ -16,13 +17,21 @@ os.makedirs(PADDLE_DIR, exist_ok=True)
 os.makedirs(STAMP_DIR, exist_ok=True)
 os.makedirs(LLAMA_DIR, exist_ok=True)
 
-def download_file(url, dest_path):
+def download_file(url, dest_path, retries=3):
     print(f"Downloading {os.path.basename(dest_path)}...")
-    try:
-        urllib.request.urlretrieve(url, dest_path)
-        print("Done.")
-    except Exception as e:
-        print(f"Error downloading {url}: {e}")
+    for attempt in range(1, retries + 1):
+        try:
+            urllib.request.urlretrieve(url, dest_path)
+            print(" Done.")
+            return True
+        except Exception as e:
+            print(f"Attempt {attempt}/{retries} failed: {e}")
+            if os.path.exists(dest_path):
+                os.remove(dest_path) # Clean up partial file
+            if attempt < retries:
+                time.sleep(2) # Brief pause before retrying
+                
+    return False
 
 def setup_paddle():
     print("\n--- 1. Setting up PaddleOCR ---")
@@ -36,31 +45,40 @@ def setup_paddle():
         filename = url.split("/")[-1]
         save_path = os.path.join(PADDLE_DIR, filename)
         
-        if not os.path.exists(save_path.replace(".tar", "")): # Skip if already extracted
-            download_file(url, save_path)
-            print(f"📦 Extracting {filename}...")
-            with tarfile.open(save_path) as tar:
-                tar.extractall(path=PADDLE_DIR)
-            os.remove(save_path)
+        # Check if already extracted
+        if not os.path.exists(save_path.replace(".tar", "")): 
+            # Only extract if download returns True
+            if download_file(url, save_path):
+                print(f"Extracting {filename}...")
+                try:
+                    with tarfile.open(save_path) as tar:
+                        tar.extractall(path=PADDLE_DIR)
+                    os.remove(save_path)
+                except tarfile.ReadError:
+                    print(f"Corrupted archive: {filename}. Deleting...")
+                    if os.path.exists(save_path):
+                        os.remove(save_path)
+            else:
+                print(f"Failed to download {name} after multiple attempts.")
         else:
             print(f"{name} already exists. Skipping.")
 
 def setup_huggingface():
     print("\n--- 2. Setting up Hugging Face Models ---")
     
-    # Stamp Model (Public)
     print("Downloading Stamp Detector (Ooredoo)...")
     try:
         snapshot_download(
             repo_id="Ooredoo-Group/ooredoo-stamp-detection",
             local_dir=STAMP_DIR,
-            allow_patterns=["config.json", "*.safetensors", "preprocessor_config.json"]
+            allow_patterns=["config.json", "*.safetensors", "preprocessor_config.json"],
+            resume_download=True,
+            local_dir_use_symlinks=False
         )
         print("Stamp model ready.")
     except Exception as e:
         print(f"Error: {e}")
 
-    # Llama 3.2 1B (Gated - Requires Token)
     print("\n⏳ Downloading Llama 3.2 1B...")
     print("NOTE: You need a Hugging Face token with access to meta-llama/Llama-3.2-1B-Instruct.")
     token = os.environ.get("HF_TOKEN") or input("Paste your Hugging Face Token (or press Enter if logged in via CLI): ")
@@ -70,7 +88,9 @@ def setup_huggingface():
             repo_id="meta-llama/Llama-3.2-1B-Instruct",
             local_dir=LLAMA_DIR,
             ignore_patterns=["*.pth", "original/*"],
-            token=token if token else None
+            token=token if token else None,
+            resume_download=True,
+            local_dir_use_symlinks=False
         )
         print("Llama model ready.")
     except Exception as e:
@@ -84,9 +104,7 @@ def check_sign_model():
         print("'sign_model.pt' found.")
     else:
         print("WARNING: 'sign_model.pt' is missing!")
-        print("This is a custom trained model. You must manually place it in:")
-        print(f"   {sign_path}")
-        print("Or download it from your Project Releases page if you uploaded it there.")
+        print("You must place your custom YOLO model inside: models/sign_model.pt")
 
 if __name__ == "__main__":
     setup_paddle()

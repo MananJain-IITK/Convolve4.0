@@ -1,270 +1,145 @@
-# Convolve 4.0
-
-Intelligent Document AI for Invoice Field Extraction
+# Convolve 4.0: Intelligent Document AI for Invoice Field Extraction
 
 ## Problem Statement
 
-Modern financial institutions rely on automated extraction of key information from semi-structured documents such as invoices and quotations to accelerate credit decisioning, vendor reconciliation, and loan disbursal workflows. These documents vary significantly in layout, language, and quality, including scanned copies, photographs, and handwritten text.
+Modern financial institutions rely on automated extraction of key information from semi-structured documents (invoices, quotations) to accelerate credit decisioning, vendor reconciliation, and loan disbursals. These documents vary significantly in layout, language, and quality.
 
-This project is built as a submission for **IDFC First Bank – GenAI Hackathon (Convolve 4.0)**. The objective is to design an end-to-end, low-cost, and scalable **Document AI system** that accurately extracts structured information from invoice-type documents, with a focus on tractor loan quotations, while remaining generalizable to other invoice formats.
+This project is submitted for the **IDFC First Bank – GenAI Hackathon (Convolve 4.0)**. The objective is to design an end-to-end, low-cost, and scalable **Document AI system** that accurately extracts structured information from invoice-type documents while maintaining sub-$0.01 costs per document.
 
 ## Objective
 
-Given an input invoice document, the system extracts the following fields and outputs them as structured JSON:
+Given an input invoice image, the system extracts the following fields and outputs them as strict JSON:
 
-* Dealer Name (text, fuzzy match)
-* Model Name (text, exact match)
-* Horse Power (numeric, exact match)
-* Asset Cost (numeric, exact match)
-* Dealer Signature (binary presence with bounding box)
-* Dealer Stamp (binary presence with bounding box)
+* **Dealer Name** (text)
+* **Model Name** (text, exact match)
+* **Horse Power** (integer)
+* **Asset Cost** (integer)
+* **Dealer Signature** (binary presence with bounding box)
+* **Dealer Stamp** (binary presence with bounding box)
 
-The system is designed to meet the following targets:
+## Solution Overview & Architecture
 
-* ≥95% document-level accuracy
-* ≤30 seconds latency per document
-* Cost < $0.01 per document on CPU or low-tier GPU
+Convolve 4.0 implements a modular, multi-stage Document AI pipeline that explicitly separates **visual detection** from **semantic reasoning**, enabling explainability, reproducibility, and high-speed inference.
 
-## Solution Overview
+### Key Engineering Features
 
-Convolve 4.0 implements a **modular, multi-stage Document AI pipeline** combining classical computer vision, OCR, lightweight large language models, and object detection.
+* **Hardware-Aware Quantization:** Automatically detects CUDA availability. Utilizes `BitsAndBytes` 4-bit quantization on GPUs, with graceful CPU fallbacks to prevent Out-Of-Memory (OOM) crashes.
+* **Hybrid Visual Pipeline:** Routes raw RGB images to YOLO/Hugging Face object detectors for signatures and stamps, while passing Otsu-binarized images to the OCR engine for maximum text clarity.
+* **Zero-Shot Schema Forcing:** Leverages LLaMA 3.2 1B via strict autocomplete prompt engineering, bypassing safety-filter refusals ("lazy parrot syndrome") to guarantee data extraction.
+* **Indestructible JSON Parser:** Features a custom regex-based, brute-force structural parser that isolates and cleans JSON payloads, completely ignoring LLM hallucinations or markdown artifacts.
 
-The system explicitly separates **text understanding** and **visual detection**, enabling explainability, reproducibility, and cost-efficient inference.
-
-### High-Level Pipeline
-
-1. Document Preprocessing
-2. Text Extraction and Semantic Parsing
-3. Visual Detection of Signature and Stamp
-4. Post-processing and Validation
-5. Structured JSON Output with Metrics
-
-
-## System Architecture
-
-### 1. Image Preprocessing
-
-Input invoice images are normalized to improve OCR robustness across scanned, photographed, and low-quality documents.
-
-Techniques used:
-
-* Grayscale conversion
-* CLAHE contrast enhancement
-* Gaussian denoising
-* Otsu binarization for clear foreground-background separation
-
-Implemented in:
-
-```
-utils/preprocess.py
-```
-
-
-
-### 2. Text Extraction and Field Parsing
-
-Text extraction is performed using a **hybrid OCR strategy**:
-
-* EasyOCR for multilingual OCR (English, Hindi, Marathi)
-* Tesseract as a fallback when OCR confidence is low
-
-The extracted raw text is passed to a **quantized LLaMA 3.2 1B Instruct model**, which converts unstructured OCR text into structured JSON using controlled prompting.
-
-Key properties:
-
-* 4-bit quantized inference
-* Offline execution
-* Deterministic, schema-constrained output
-
-Fields extracted:
-
-* Dealer Name
-* Model Name
-* Horse Power
-* Asset Cost
-
-Implemented in:
-
-```
-utils/extractor.py
-```
-
-
-
-### 3. Visual Detection (Signature and Stamp)
-
-Visual fields are detected independently of OCR to ensure robustness against handwritten and non-textual elements.
-
-* Dealer Signature:
-
-  * Custom-trained YOLO model
-  * Optimized for wide and irregular shapes
-
-* Dealer Stamp:
-
-  * Hugging Face object detection model
-  * Shape-based filtering to avoid false positives (e.g., invoice numbers)
-
-Bounding boxes are returned in pixel coordinates and validated using IoU-based logic.
-
-Implemented in:
-
-```
-utils/detector.py
-```
-
-
-
-### 4. Batch Execution and Metrics
-
-The main executable supports **batch processing of multiple invoices** and produces a single consolidated `result.json`.
-
-For each document, the system reports:
-
-* Extracted fields
-* Confidence score
-* Processing time (seconds)
-* Estimated inference cost (USD)
-
-Implemented in:
-
-```
-executable.py
-```
-
-
+---
 
 ## Project Structure
 
-```
+```text
 Convolve4.0/
 │
-├── executable.py              # Main inference entry point
-├── download_models.py         # Model setup and downloads
+├── executable.py              # Main inference entry point (Interactive & Batch)
+├── download_models.py         # Resilient model setup and downloads
 ├── requirements.txt
 ├── utils/
-│   ├── preprocess.py          # Image preprocessing
-│   ├── extractor.py           # OCR + LLM extraction
-│   └── detector.py            # Signature and stamp detection
+│   ├── preprocess.py          # Image enhancement and binarization
+│   ├── extractor.py           # OCR + LLaMA 3.2 Semantic Extraction
+│   └── detector.py            # YOLO Signature & HF Stamp Detection
 │
-├── models/                    # Downloaded / custom models
+├── models/                    # Local weight storage (LLaMA, EasyOCR, YOLO)
+├── Test_Images/               # Test Images for testing
 │
-└── sample_output/
-    └── result.json
+└── result.json                # Consolidated structured output
+
 ```
-
-
 
 ## Setup Instructions
 
 ### 1. Clone Repository
 
-```
+```bash
 git clone https://github.com/MananJain-IITK/Convolve4.0.git
 cd Convolve4.0
+
 ```
 
 ### 2. Install Dependencies
 
-```
+```bash
 pip install -r requirements.txt
-```
-
-### 3. Download Models
 
 ```
+
+### 3. Download & Configure Models
+
+Run the secure download script. This script features automatic network-drop recovery and corrupted-file cleanup.
+
+```bash
 python download_models.py
+
 ```
 
-Notes:
+*Note: You will be prompted to enter your Hugging Face Access Token to download the gated LLaMA 3.2 1B Instruct model. Ensure your custom YOLO model is placed at `models/sign_model.pt`.*
 
-* PaddleOCR and stamp detection models are downloaded automatically
-* LLaMA 3.2 1B requires Hugging Face access token
-* Custom `sign_model.pt` must be placed inside the `models/` directory
-
+---
 
 ## Running the System
 
-### Single or Batch Invoice Processing
+The main executable has been optimized to load the heavy 1B parameter model into RAM/VRAM exactly **once**, eliminating loop-crashing memory leaks during batch processing.
+
+### Interactive Mode (Single File)
+
+Simply run the script. It will prompt you for an image, allowing you to drag-and-drop the file directly into your terminal.
+
+```bash
+python executable.py
 
 ```
-python executable.py invoice1.jpg invoice2.jpg invoice3.jpg
+
+### Batch Processing Mode
+
+Pass multiple invoice paths directly via the command line.
+
+```bash
+python executable.py invoice1.jpg invoice2.png invoice3.jpg
+
 ```
 
-The output will be saved as:
-
-```
-result.json
-```
+---
 
 ## Output Format
 
-Each document produces one JSON object with the following schema:
+The pipeline generates a clean `result.json` array. The backend Python sanitization guarantees pure integers for numerical fields, regardless of LLM string hallucinations.
 
-```
-{
-  "doc_id": "invoice_001.jpg",
-  "fields": {
-    "dealer_name": "ABC Tractors Pvt Ltd",
-    "model_name": "DI 750",
-    "horse_power": 50,
-    "asset_cost": 525000,
-    "signature": {
-      "present": true,
-      "bbox": [x1, y1, x2, y2]
-    },
-    "stamp": {
-      "present": true,
-      "bbox": [x1, y1, x2, y2]
+```json
+[
+    {
+        "doc_id": "invoice_001.png",
+        "fields": {
+            "dealer_name": "Odisha Agro Industries Corporation Ltd.",
+            "model_name": "744 FE",
+            "horse_power": 48,
+            "asset_cost": 801815,
+            "signature": {
+                "present": true,
+                "bbox": [222, 1433, 556, 1540]
+            },
+            "stamp": {
+                "present": false,
+                "bbox": [0, 0, 0, 0]
+            }
+        },
+        "confidence": 0.95,
+        "processing_time_sec": 4.12,
+        "cost_estimate_usd": 0.00206
     }
-  },
-  "confidence": 0.95,
-  "processing_time_sec": 3.8,
-  "cost_estimate_usd": 0.002
-}
+]
+
 ```
-
-
-## Evaluation Alignment
-
-| Requirement                 | Implementation               |
-| --------------------------- | ---------------------------- |
-| Multilingual invoices       | EasyOCR + LLM                |
-| Semi-structured layouts     | OCR + semantic reasoning     |
-| Signature & stamp detection | YOLO + HF object detection   |
-| ≥95% DLA                    | Modular ensemble design      |
-| Low inference cost          | Quantized LLaMA 1B           |
-| Explainability              | Separate OCR, LLM, CV stages |
-
-
-## Cost and Latency Analysis
-
-* Average latency: 3–6 seconds per document
-* Estimated cost: ~$0.002 per document
-* Runs on CPU or low-tier GPU
-* No external paid APIs used
-
 
 ## Generalization
 
-Although trained and evaluated on tractor loan quotations, the architecture is **invoice-agnostic** and can generalize to:
+Although tested on tractor loan quotations, the schema-forced LLaMA extraction is completely **invoice-agnostic**. It can dynamically adapt to retail receipts, vendor bills, and industrial quotations without requiring model fine-tuning.
 
-* Retail invoices
-* Industrial invoices
-* Vendor bills
-* Financial quotations
+## Authors
 
+**Manan Jain** Indian Institute of Technology Kanpur
 
-
-## Author
-
-Manan Jain
-Indian Institute of Technology Kanpur
-
-Nisarg Parashar 
-Indian Institute of Technology Kanpur
-
-
-## Hackathon Submission
-
-This repository is submitted as part of **IDFC First Bank – GenAI Hackathon (Convolve 4.0)** and follows all required submission guidelines, evaluation metrics, and output formats defined in the official problem statement.
+**Nisarg Parashar** Indian Institute of Technology Kanpur

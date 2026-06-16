@@ -18,9 +18,7 @@ class ImagePreprocessor:
         # 3. Denoise (Remove grain)
         denoised = cv2.GaussianBlur(enhanced, (3, 3), 0)
 
-        # 4. Otsu's Binarization (New Step!)
-        # This makes text BLACK and background WHITE explicitly.
-        # Great for invoices.
+        # 4. Otsu's Binarization
         _, binary = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
         # Save Temp
